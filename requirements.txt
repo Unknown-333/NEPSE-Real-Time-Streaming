@@ -1,0 +1,23 @@
+# =============================================================
+# NEPSE Real-Time Streaming Pipeline - Python Dependencies
+# =============================================================
+# Install: pip install -r requirements.txt
+# =============================================================
+
+# --- Phase 1: Data Generation ---
+pandas==2.2.3
+numpy==2.2.3
+
+# --- Phase 3: Kafka Producer ---
+confluent-kafka==2.6.1
+
+# --- Phase 4: PySpark Structured Streaming ---
+# NOTE: pyspark version must match the Kafka connector JAR version.
+# We pin pyspark 3.5.4 + spark-sql-kafka-0-10_2.12:3.5.4
+pyspark==3.5.4
+
+# --- Phase 5: TimescaleDB / PostgreSQL ---
+psycopg2-binary==2.9.10
+
+# --- Utilities ---
+python-dotenv==1.0.1
