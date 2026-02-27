@@ -22,9 +22,12 @@ env/
 # Environment Variables
 .env
 
-# Data (large files - not tracked in git)
+# Data files (too large for Git)
 data/raw/*.csv
-data/raw/*.xlsx
+data/raw/*.parquet
+data/checkpoints/
+derby.log
+metastore_db/
 !data/raw/.gitkeep
 
 # OS
