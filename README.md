@@ -1,8 +1,8 @@
-# 🇳🇵 NEPSE Real-Time Stock Market Streaming Pipeline
+#  NEPSE Real-Time Stock Market Streaming Pipeline
 
 A production-grade, end-to-end streaming data pipeline that replays historical Nepal Stock Exchange (NEPSE) floorsheet data through a modern streaming architecture.
 
-## 🏗️ Architecture
+##  Architecture
 
 ```
 Historical NEPSE CSV → Python Simulator (100x) → Apache Kafka (KRaft) → PySpark Structured Streaming → TimescaleDB → Grafana
@@ -17,7 +17,7 @@ Historical NEPSE CSV → Python Simulator (100x) → Apache Kafka (KRaft) → Py
 | **Storage** | TimescaleDB (PostgreSQL) | Time-series optimized hypertables |
 | **Dashboard** | Grafana | Sub-second live visualization |
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 NEPSE Real-Time Streaming/
@@ -38,7 +38,7 @@ NEPSE Real-Time Streaming/
 └── .env.example                 # Environment variable template
 ```
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Prerequisites
 - Python 3.10+
@@ -88,7 +88,7 @@ python -m src.consumer.spark_consumer
 ### 5. View Dashboard
 Open Grafana at `http://localhost:3000`
 
-## 📊 Floorsheet Data Schema
+## Floorsheet Data Schema
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -102,7 +102,7 @@ Open Grafana at `http://localhost:3000`
 | `trade_time` | timestamp | Trade execution time |
 | `sector` | string | Sector classification |
 
-## 🛠️ Tech Stack Versions
+## Tech Stack Versions
 
 | Package | Version | Why Pinned |
 |---------|---------|-----------|
@@ -111,6 +111,6 @@ Open Grafana at `http://localhost:3000`
 | confluent-kafka | 2.6.1 | Stable Python Kafka client |
 | pandas | 2.2.3 | Data generation |
 
-## 📝 License
+##  License
 
 MIT
