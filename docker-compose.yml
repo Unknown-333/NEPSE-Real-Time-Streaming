@@ -1,0 +1,182 @@
+# =============================================================
+# NEPSE Real-Time Streaming Pipeline — Docker Infrastructure
+# =============================================================
+#
+# ARCHITECTURE:
+#   ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+#   │  Kafka Broker  │────▶│  Kafka-Init   │     │   Kafka UI    │
+#   │  (KRaft mode)  │     │ (topic setup) │     │  (port 8080)  │
+#   │  port: 9092    │     └───────────────┘     │               │
+#   └───────────────┘                            └───────────────┘
+#
+# WHY KRaft (no Zookeeper)?
+#   - Kafka 3.7+ treats KRaft as production-ready (KIP-833)
+#   - Eliminates an entire service (Zookeeper) = simpler ops
+#   - Faster broker startup, lower memory footprint
+#   - This is where the Kafka ecosystem is heading — Zookeeper
+#     is deprecated and will be removed in Kafka 4.0
+#
+# USAGE:
+#   docker-compose up -d          # Start everything
+#   docker-compose logs -f kafka  # Watch Kafka logs
+#   docker-compose down -v        # Tear down + delete volumes
+# =============================================================
+
+services:
+
+  # ═══════════════════════════════════════════════════════════
+  # Kafka Broker — KRaft Mode (No Zookeeper)
+  # ═══════════════════════════════════════════════════════════
+  # WHY confluentinc/cp-kafka:7.7.1?
+  #   - Ships Kafka 3.7.x with production-ready KRaft
+  #   - Well-documented, widely used in industry
+  #   - Compatible with confluent-kafka Python client
+  # ═══════════════════════════════════════════════════════════
+  kafka:
+    image: confluentinc/cp-kafka:7.7.1
+    container_name: nepse-kafka
+    hostname: kafka
+    ports:
+      # 9092: External listener (your Python producer/PySpark connect here)
+      # 29092: Internal listener (inter-container communication)
+      - "9092:9092"
+    environment:
+      # ── KRaft Configuration ──
+      # CLUSTER_ID: Unique identifier for this Kafka cluster.
+      # WHY a static ID? Reproducibility. Every team member gets the
+      # same cluster ID, making debugging consistent.
+      # Generated via: kafka-storage random-uuid
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+
+      # NODE_ID: Unique ID for this broker node (single-node = 1)
+      KAFKA_NODE_ID: 1
+
+      # PROCESS_ROLES: This single node acts as BOTH a controller
+      # (manages metadata, replaces Zookeeper) AND a broker
+      # (stores/serves data). In production, you'd separate these.
+      KAFKA_PROCESS_ROLES: "broker,controller"
+
+      # ── Listener Configuration ──
+      # WHY three listeners? This is the #1 source of Kafka config confusion.
+      #
+      # PLAINTEXT (29092): For containers talking to Kafka INSIDE Docker network
+      #   → Used by: kafka-init, kafka-ui
+      #
+      # EXTERNAL (9092): For apps OUTSIDE Docker (your host machine)
+      #   → Used by: Python producer, PySpark consumer
+      #
+      # CONTROLLER (29093): KRaft controller-to-broker protocol
+      #   → Used by: Kafka's internal metadata replication
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:29093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:29092,EXTERNAL://localhost:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+
+      # ── Controller Quorum ──
+      # Format: {node_id}@{host}:{controller_port}
+      # Single-node setup, so the quorum is just this broker.
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:29093"
+
+      # ── Topic Defaults ──
+      # Replication factor = 1 (single broker, can't replicate)
+      # In production, you'd use 3 brokers with factor = 3
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+      # ── Performance Tuning ──
+      # Log retention: 24 hours (sufficient for streaming replay)
+      KAFKA_LOG_RETENTION_HOURS: 24
+      # Segment size: 256MB (balances disk I/O and compaction)
+      KAFKA_LOG_SEGMENT_BYTES: 268435456
+      # Disable auto topic creation — we want explicit topic management
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+
+    # ── Resource Limits ──
+    # WHY cap memory? Kafka is a JVM app that will happily eat all
+    # available RAM if you let it. On a dev machine, 2GB is plenty
+    # for a single broker handling our 12.5M message dataset.
+    mem_limit: 2g
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      # WHY this specific check? A running container ≠ a ready broker.
+      # This verifies Kafka can actually list topics (fully bootstrapped).
+      test: [ "CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list || exit 1" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════
+  # Kafka Init — Automatic Topic Creation
+  # ═══════════════════════════════════════════════════════════
+  # WHY a separate init container?
+  #   - Separation of concerns: broker starts, THEN topics are created
+  #   - Idempotent: --if-not-exists means re-running is safe
+  #   - No manual `docker exec` needed — fully automated
+  #   - Container exits after setup (one-shot job)
+  # ═══════════════════════════════════════════════════════════
+  kafka-init:
+    image: confluentinc/cp-kafka:7.7.1
+    container_name: nepse-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: [ "/bin/bash", "-c" ]
+    command:
+      - |
+        echo '=========================================='
+        echo '  NEPSE Kafka Topic Initialization'
+        echo '=========================================='
+        echo 'Creating topic: nepse-raw-ticks (3 partitions)...'
+        kafka-topics --create --bootstrap-server kafka:29092 --topic nepse-raw-ticks --partitions 3 --replication-factor 1 --if-not-exists --config retention.ms=86400000
+        echo 'Creating topic: nepse-aggregated (1 partition)...'
+        kafka-topics --create --bootstrap-server kafka:29092 --topic nepse-aggregated --partitions 1 --replication-factor 1 --if-not-exists --config retention.ms=86400000
+        echo ''
+        echo '=========================================='
+        echo '  Topics created successfully!'
+        echo '=========================================='
+        kafka-topics --list --bootstrap-server kafka:29092
+        echo ''
+        kafka-topics --describe --bootstrap-server kafka:29092
+        echo '=========================================='
+    mem_limit: 512m
+    restart: "no"
+
+  # ═══════════════════════════════════════════════════════════
+  # Kafka UI — Visual Topic/Partition Monitor
+  # ═══════════════════════════════════════════════════════════
+  # WHY Kafka UI?
+  #   - See messages flowing in real-time (great for debugging)
+  #   - Monitor consumer lag, partition distribution
+  #   - Inspect message keys/values without CLI
+  #   - Portfolio-worthy: proves you think about observability
+  # ═══════════════════════════════════════════════════════════
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: nepse-kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: "nepse-local"
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: "kafka:29092"
+      # Dynamic UI config — enables topic creation from the UI as well
+      DYNAMIC_CONFIG_ENABLED: "true"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    mem_limit: 512m
+    restart: unless-stopped
+
+# ═══════════════════════════════════════════════════════════
+# Named Volumes
+# ═══════════════════════════════════════════════════════════
+# WHY named volumes?
+#   - Data persists across docker-compose down/up cycles
+#   - You can wipe everything cleanly with: docker-compose down -v
+volumes:
+  kafka_data:
+    driver: local
