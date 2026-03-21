@@ -196,6 +196,10 @@ The PySpark consumer computes 1-minute tumbling window aggregations per stock sy
 - **Synthetic data generator**: Geometric Brownian Motion for realistic price walks, U-shaped intraday volume profile, 65 real NEPSE stocks across 9 sectors
 - **Chunked CSV reading**: 10K rows per chunk keeps memory under 50MB for the 1GB+ dataset
 
+## Interview Prep
+
+See [INTERVIEW_PREP.md](INTERVIEW_PREP.md) for a comprehensive guide that explains every component, design decision, and common interview questions about this project — written so a complete beginner can understand and confidently explain the entire pipeline.
+
 ## License
 
 MIT
