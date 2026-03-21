@@ -38,10 +38,14 @@ POSTGRES_DB = os.getenv("POSTGRES_DB", "nepse_streaming")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "nepse_user")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "changeme_in_production")
 
-# JDBC URL for PySpark (Phase 5)
+# JDBC URL for PySpark
 POSTGRES_JDBC_URL = (
     f"jdbc:postgresql://{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 )
+
+# TimescaleDB sink settings (Phase 5)
+TIMESCALEDB_TABLE = os.getenv("TIMESCALEDB_TABLE", "ohlcv_1min")
+SINK_BATCH_SIZE = int(os.getenv("SINK_BATCH_SIZE", "100"))
 
 
 # ═══════════════════════════════════════════════════════════════
