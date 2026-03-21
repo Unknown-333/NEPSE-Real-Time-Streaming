@@ -171,6 +171,99 @@ services:
     mem_limit: 512m
     restart: unless-stopped
 
+  # ═══════════════════════════════════════════════════════════
+  # TimescaleDB — Time-Series Optimized PostgreSQL
+  # ═══════════════════════════════════════════════════════════
+  # WHY TimescaleDB (not plain PostgreSQL)?
+  #   - Hypertables: Auto-partition by time for fast range queries
+  #   - Continuous aggregates: Pre-computed rollups (5-min from 1-min)
+  #   - Compression: 90%+ reduction for historical data
+  #   - Full PostgreSQL compatibility: works with Grafana, psycopg2,
+  #     pgAdmin, and all standard tools
+  #
+  # WHY timescale/timescaledb:latest-pg16?
+  #   - PostgreSQL 16 is the latest stable release
+  #   - TimescaleDB extension is pre-installed and ready to use
+  #   - No manual extension compilation needed
+  # ═══════════════════════════════════════════════════════════
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: nepse-timescaledb
+    ports:
+      # 5432: Standard PostgreSQL port
+      # Your Python sink and Grafana connect here
+      - "5432:5432"
+    environment:
+      # These match the values in .env and config.py
+      POSTGRES_DB: ${POSTGRES_DB:-nepse_streaming}
+      POSTGRES_USER: ${POSTGRES_USER:-nepse_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_in_production}
+    volumes:
+      # ── Persistent data volume ──
+      - timescaledb_data:/var/lib/postgresql/data
+      # ── Auto-run schema init on first boot ──
+      # Docker's postgres image runs all .sql files in this directory
+      # alphabetically on first container creation. Our init.sql creates
+      # the ohlcv_1min hypertable, indexes, and continuous aggregates.
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      # pg_isready checks if PostgreSQL is accepting connections.
+      # Unlike a simple port check, this confirms the DB is fully
+      # bootstrapped and ready for queries.
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nepse_user} -d ${POSTGRES_DB:-nepse_streaming}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    mem_limit: 1g
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════
+  # Grafana — Real-Time Dashboard
+  # ═══════════════════════════════════════════════════════════
+  # WHY Grafana (not Metabase, Superset, etc.)?
+  #   - Native PostgreSQL/TimescaleDB support with time_bucket()
+  #   - Sub-second auto-refresh (10s) for live streaming dashboards
+  #   - Built-in candlestick, stat, heatmap panel types
+  #   - File-based provisioning: dashboards + datasources deploy
+  #     automatically with zero manual setup
+  #   - Industry standard for real-time observability
+  #
+  # AUTO-PROVISIONING:
+  #   On first boot, Grafana reads:
+  #   1. provisioning/datasources/*.yml → auto-connects TimescaleDB
+  #   2. provisioning/dashboards/*.yml  → imports dashboard JSONs
+  #   No manual clicking required!
+  # ═══════════════════════════════════════════════════════════
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: nepse-grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      # Admin credentials from .env
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Allow iframe embedding (useful for portfolio/demo)
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      # Skip login page for quick demo access
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      # ── Persistent data (users, preferences, alerts) ──
+      - grafana_data:/var/lib/grafana
+      # ── Auto-provision datasource (TimescaleDB connection) ──
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      # ── Auto-provision dashboard provider config ──
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      # ── Dashboard JSON files ──
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    mem_limit: 512m
+    restart: unless-stopped
+
 # ═══════════════════════════════════════════════════════════
 # Named Volumes
 # ═══════════════════════════════════════════════════════════
@@ -179,4 +272,8 @@ services:
 #   - You can wipe everything cleanly with: docker-compose down -v
 volumes:
   kafka_data:
+    driver: local
+  timescaledb_data:
+    driver: local
+  grafana_data:
     driver: local

@@ -1,0 +1,449 @@
+{
+  "__inputs": [],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "11.4.0" },
+    { "type": "datasource", "id": "postgres", "name": "PostgreSQL", "version": "1.0.0" }
+  ],
+  "annotations": { "list": [] },
+  "description": "Real-time NEPSE stock market streaming dashboard powered by TimescaleDB",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "📈 NEPSE Real-Time Market Data",
+      "type": "row"
+    },
+    {
+      "id": 1,
+      "title": "OHLC Candlestick — $symbol",
+      "description": "1-minute candlestick chart for the selected stock symbol. Shows Open, High, Low, Close price movements in real-time.",
+      "type": "candlestick",
+      "datasource": { "type": "postgres", "uid": "" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "color": {
+            "mode": "fixed"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "open" },
+            "properties": [{ "id": "displayName", "value": "Open" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "high" },
+            "properties": [{ "id": "displayName", "value": "High" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "low" },
+            "properties": [{ "id": "displayName", "value": "Low" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "close" },
+            "properties": [{ "id": "displayName", "value": "Close" }]
+          }
+        ]
+      },
+      "gridPos": { "h": 10, "w": 16, "x": 0, "y": 1 },
+      "options": {
+        "includeAllFields": false,
+        "mode": "candles",
+        "candleStyle": "candles",
+        "colorStrategy": "open-close",
+        "colors": {
+          "up": "rgb(38, 166, 91)",
+          "down": "rgb(224, 47, 68)",
+          "flat": "rgb(132, 132, 132)"
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  window_start AS \"time\",\n  open,\n  high,\n  low,\n  close\nFROM ohlcv_1min\nWHERE symbol = '$symbol'\n  AND window_start >= $__timeFrom()\n  AND window_start <= $__timeTo()\nORDER BY window_start ASC;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Pipeline Health",
+      "description": "Real-time pipeline metrics: total records ingested, distinct symbols active, and last data timestamp.",
+      "type": "stat",
+      "datasource": { "type": "postgres", "uid": "" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 100 },
+              { "color": "green", "value": 1000 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "total_records" },
+            "properties": [
+              { "id": "displayName", "value": "Total Records" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "active_symbols" },
+            "properties": [
+              { "id": "displayName", "value": "Active Symbols" },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "last_update" },
+            "properties": [
+              { "id": "displayName", "value": "Last Update" },
+              { "id": "unit", "value": "dateTimeAsIso" }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 1 },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": ["lastNotNull"],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  COUNT(*)::BIGINT AS total_records,\n  COUNT(DISTINCT symbol)::BIGINT AS active_symbols,\n  MAX(window_start) AS last_update\nFROM ohlcv_1min;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "VWAP by Sector",
+      "description": "Average volume-weighted price by sector. Shows which sectors are trading at higher/lower price levels.",
+      "type": "piechart",
+      "datasource": { "type": "postgres", "uid": "" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 6 },
+      "options": {
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": "/^avg_vwap$/"
+        },
+        "pieType": "donut",
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true,
+          "values": ["value"]
+        },
+        "displayLabels": ["name", "percent"]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  sector,\n  ROUND(AVG(vwap)::NUMERIC, 2) AS avg_vwap\nFROM ohlcv_1min\nWHERE window_start >= NOW() - INTERVAL '1 hour'\nGROUP BY sector\nORDER BY avg_vwap DESC;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 11 },
+      "id": 101,
+      "title": "📊 Volume & Trading Activity",
+      "type": "row"
+    },
+    {
+      "id": 4,
+      "title": "Volume Bars — $symbol",
+      "description": "Per-minute trading volume (total shares traded) for the selected symbol. Aligns with the candlestick chart above.",
+      "type": "barchart",
+      "datasource": { "type": "postgres", "uid": "" },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "rgba(50, 116, 217, 0.7)"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "Shares",
+            "fillOpacity": 80,
+            "gradientMode": "scheme",
+            "lineWidth": 0
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 12 },
+      "options": {
+        "barWidth": 0.8,
+        "groupWidth": 0.7,
+        "orientation": "vertical",
+        "showValue": "never",
+        "stacking": "none",
+        "tooltip": { "mode": "single", "sort": "none" },
+        "xTickLabelRotation": -45,
+        "legend": { "displayMode": "hidden" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  window_start AS \"time\",\n  volume\nFROM ohlcv_1min\nWHERE symbol = '$symbol'\n  AND window_start >= $__timeFrom()\n  AND window_start <= $__timeTo()\nORDER BY window_start ASC;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Top 10 Stocks by Turnover",
+      "description": "Most actively traded stocks ranked by total turnover (NPR) in the current time window.",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "symbol" },
+            "properties": [
+              { "id": "displayName", "value": "Symbol" },
+              { "id": "custom.width", "value": 100 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "sector" },
+            "properties": [
+              { "id": "displayName", "value": "Sector" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "total_turnover" },
+            "properties": [
+              { "id": "displayName", "value": "Turnover (NPR)" },
+              { "id": "unit", "value": "currencyINR" },
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{"color": "rgba(50,116,217,0.1)", "value": null}, {"color": "rgba(50,116,217,0.3)", "value": 1000000}, {"color": "rgba(50,116,217,0.6)", "value": 10000000}] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "total_volume" },
+            "properties": [
+              { "id": "displayName", "value": "Volume" },
+              { "id": "unit", "value": "short" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "avg_vwap" },
+            "properties": [
+              { "id": "displayName", "value": "VWAP" },
+              { "id": "decimals", "value": 2 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "trades" },
+            "properties": [
+              { "id": "displayName", "value": "Trades" }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 12 },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": { "show": false, "reducer": ["sum"], "countRows": false },
+        "sortBy": [{ "displayName": "Turnover (NPR)", "desc": true }]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  symbol,\n  sector,\n  SUM(turnover)::NUMERIC AS total_turnover,\n  SUM(volume)::BIGINT AS total_volume,\n  ROUND(AVG(vwap)::NUMERIC, 2) AS avg_vwap,\n  SUM(trade_count)::BIGINT AS trades\nFROM ohlcv_1min\nWHERE window_start >= $__timeFrom()\n  AND window_start <= $__timeTo()\nGROUP BY symbol, sector\nORDER BY total_turnover DESC\nLIMIT 10;",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 },
+      "id": 102,
+      "title": "🔴 Live Data Feed",
+      "type": "row"
+    },
+    {
+      "id": 6,
+      "title": "Latest OHLCV Windows (Live Stream)",
+      "description": "Most recent 1-minute OHLCV windows across all symbols. Auto-refreshes every 10 seconds to show streaming data.",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "symbol" },
+            "properties": [
+              { "id": "displayName", "value": "Symbol" },
+              { "id": "custom.width", "value": 90 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "window_start" },
+            "properties": [
+              { "id": "displayName", "value": "Window Start" },
+              { "id": "unit", "value": "dateTimeAsIso" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "open" },
+            "properties": [{ "id": "displayName", "value": "Open" }, { "id": "decimals", "value": 2 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "high" },
+            "properties": [{ "id": "displayName", "value": "High" }, { "id": "decimals", "value": 2 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "low" },
+            "properties": [{ "id": "displayName", "value": "Low" }, { "id": "decimals", "value": 2 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "close" },
+            "properties": [{ "id": "displayName", "value": "Close" }, { "id": "decimals", "value": 2 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "volume" },
+            "properties": [{ "id": "displayName", "value": "Volume" }, { "id": "unit", "value": "short" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "vwap" },
+            "properties": [{ "id": "displayName", "value": "VWAP" }, { "id": "decimals", "value": 2 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "sector" },
+            "properties": [{ "id": "displayName", "value": "Sector" }]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": { "show": false, "reducer": ["sum"], "countRows": false },
+        "sortBy": [{ "displayName": "Window Start", "desc": true }]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  symbol,\n  window_start,\n  open,\n  high,\n  low,\n  close,\n  volume,\n  vwap,\n  sector\nFROM ohlcv_1min\nORDER BY window_start DESC, symbol ASC\nLIMIT 50;",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["nepse", "streaming", "real-time", "stock-market"],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "NABIL",
+          "value": "NABIL"
+        },
+        "datasource": { "type": "postgres", "uid": "" },
+        "definition": "SELECT DISTINCT symbol FROM ohlcv_1min ORDER BY symbol;",
+        "description": "Select a stock symbol to filter charts",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Symbol",
+        "multi": false,
+        "name": "symbol",
+        "options": [],
+        "query": "SELECT DISTINCT symbol FROM ohlcv_1min ORDER BY symbol;",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "Asia/Kathmandu",
+  "title": "NEPSE Real-Time Streaming Dashboard",
+  "uid": "nepse-realtime-v1",
+  "version": 1
+}

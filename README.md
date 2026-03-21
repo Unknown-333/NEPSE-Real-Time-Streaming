@@ -1,21 +1,22 @@
 # NEPSE Real-Time Stock Market Streaming Pipeline
 
-A production-grade, end-to-end streaming data pipeline that replays historical Nepal Stock Exchange (NEPSE) floorsheet data through a modern streaming architecture.
+A production-grade, end-to-end streaming data pipeline that replays historical Nepal Stock Exchange (NEPSE) floorsheet data through a modern streaming architecture — from raw trades to live Grafana dashboards.
 
 ## Architecture
 
 ```
-Historical NEPSE CSV --> Python Simulator (100x) --> Apache Kafka (KRaft) --> PySpark Structured Streaming --> TimescaleDB --> Grafana
+Historical CSV → Python Simulator (100x) → Kafka (KRaft) → PySpark Streaming → Kafka Aggregated → Python Sink → TimescaleDB → Grafana
 ```
 
 | Component | Technology | Purpose |
 |-----------|-----------|---------|
-| **Data Source** | Synthetic Floorsheet Generator | Realistic transaction-level data (50K+ trades/day) |
+| **Data Source** | Synthetic Floorsheet Generator | Realistic trade data (50K+ trades/day, GBM prices) |
 | **Producer** | Python + confluent-kafka | Replays CSV into Kafka at configurable speed |
 | **Broker** | Apache Kafka (KRaft mode) | Distributed message broker (no Zookeeper) |
 | **Processor** | PySpark Structured Streaming | 1-min tumbling window OHLCV aggregations |
-| **Storage** | TimescaleDB (PostgreSQL) | Time-series optimized hypertables |
-| **Dashboard** | Grafana | Sub-second live visualization |
+| **Sink** | Python + psycopg2 | Kafka → TimescaleDB batch upserts (idempotent) |
+| **Storage** | TimescaleDB (PostgreSQL) | Hypertable with continuous aggregates |
+| **Dashboard** | Grafana | Auto-provisioned real-time visualization |
 
 ## Project Structure
 
@@ -31,11 +32,21 @@ NEPSE Real-Time Streaming/
 │   │   └── kafka_producer.py        # Kafka replay simulator
 │   ├── consumer/
 │   │   └── spark_consumer.py        # PySpark OHLCV aggregator
+│   ├── sink/
+│   │   └── timescaledb_sink.py      # Kafka → TimescaleDB writer
 │   └── utils/
 │       └── logger.py                # Structured logging factory
-├── grafana/dashboards/              # Grafana dashboard JSON
-├── sql/                             # TimescaleDB init scripts
-├── docker-compose.yml               # Kafka KRaft + Kafka UI
+├── sql/
+│   └── init.sql                     # TimescaleDB hypertable schema
+├── grafana/
+│   ├── dashboards/
+│   │   └── nepse_realtime.json      # Auto-provisioned dashboard (6 panels)
+│   └── provisioning/
+│       ├── datasources/
+│       │   └── timescaledb.yml      # Auto-connect Grafana → TimescaleDB
+│       └── dashboards/
+│           └── dashboard.yml        # Dashboard file provider config
+├── docker-compose.yml               # Full infrastructure stack
 ├── requirements.txt                 # Pinned Python dependencies
 └── .env.example                     # Environment variable template
 ```
@@ -77,10 +88,12 @@ python -m src.data_generator.generate_floorsheet --days 125 --trades 30000
 ```bash
 docker-compose up -d
 
-# Verify topics were created
-docker logs nepse-kafka-init
+# Verify all services are healthy
+docker-compose ps
 
-# Open Kafka UI at http://localhost:8080
+# Check TimescaleDB schema
+docker logs nepse-kafka-init
+docker exec -it nepse-timescaledb psql -U nepse_user -d nepse_streaming -c "\dt"
 ```
 
 ### 4. Run Pipeline
@@ -88,16 +101,42 @@ docker logs nepse-kafka-init
 # Terminal 1: Start producer (replays CSV into Kafka at 100x speed)
 python -m src.producer.kafka_producer --speed 100
 
-# Terminal 2: Start consumer (PySpark OHLCV aggregations)
+# Terminal 2: Start PySpark consumer (1-min OHLCV aggregations)
 # Windows: ensure HADOOP_HOME is set
 set HADOOP_HOME=C:\hadoop
 python -m src.consumer.spark_consumer
+
+# Terminal 3: Start TimescaleDB sink (Kafka → database)
+python -m src.sink.timescaledb_sink
 ```
 
 ### 5. Monitor
-- Kafka UI: http://localhost:8080
-- Spark UI: http://localhost:4040 (while consumer is running)
-- Grafana: http://localhost:3000 (Phase 6)
+| Service | URL | Credentials |
+|---------|-----|------------|
+| **Grafana Dashboard** | http://localhost:3000 | admin / admin |
+| **Kafka UI** | http://localhost:8080 | — |
+| **Spark UI** | http://localhost:4040 | — (while consumer runs) |
+
+## Services
+
+| Container | Image | Port | Purpose |
+|-----------|-------|------|---------|
+| `nepse-kafka` | confluentinc/cp-kafka:7.7.1 | 9092 | Kafka broker (KRaft) |
+| `nepse-kafka-init` | confluentinc/cp-kafka:7.7.1 | — | Topic creation (one-shot) |
+| `nepse-kafka-ui` | provectuslabs/kafka-ui:latest | 8080 | Visual topic monitor |
+| `nepse-timescaledb` | timescale/timescaledb:latest-pg16 | 5432 | Time-series database |
+| `nepse-grafana` | grafana/grafana:11.4.0 | 3000 | Live dashboard |
+
+## Grafana Dashboard Panels
+
+| Panel | Type | Description |
+|-------|------|-------------|
+| OHLC Candlestick | Candlestick | Price chart for selected symbol (variable dropdown) |
+| Volume Bars | Bar chart | Per-minute volume aligned with candlestick |
+| Top 10 by Turnover | Table | Most actively traded stocks (ranked) |
+| VWAP by Sector | Donut | Average VWAP breakdown across sectors |
+| Live Trade Ticker | Table | Latest 50 OHLCV windows streaming in |
+| Pipeline Health | Stat | Total records, active symbols, last update |
 
 ## OHLCV Output Schema
 
@@ -118,19 +157,17 @@ The PySpark consumer computes 1-minute tumbling window aggregations per stock sy
 | `vwap` | float | Volume-weighted average price |
 | `sector` | string | Sector classification |
 
-## Floorsheet Data Schema
+## TimescaleDB Schema
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `contract_no` | string | Unique transaction ID (YYYYMMDD-NNNNNN) |
-| `symbol` | string | Stock ticker (e.g., NABIL, NICA) |
-| `buyer` | int | Buyer broker number (1-58) |
-| `seller` | int | Seller broker number (1-58) |
-| `quantity` | int | Shares traded |
-| `rate` | float | Price per share (NPR) |
-| `amount` | float | Total value (quantity x rate) |
-| `trade_time` | timestamp | Trade execution time |
-| `sector` | string | Sector classification |
+### Hypertable: `ohlcv_1min`
+- Auto-partitioned by `window_start` (7-day chunks)
+- Composite unique index: `(symbol, window_start)` for idempotent upserts
+- Sector + time index for sector-level queries
+
+### Continuous Aggregate: `ohlcv_5min`
+- Pre-computed 5-minute rollup from 1-minute data
+- Auto-refreshed every 5 minutes
+- OHLCV correctly rolled up (first open, last close, max high, min low)
 
 ## Tech Stack Versions
 
@@ -140,6 +177,9 @@ The PySpark consumer computes 1-minute tumbling window aggregations per stock sy
 | Kafka Connector | spark-sql-kafka-0-10_2.12:3.5.4 | Scala 2.12 + Spark 3.5.4 |
 | confluent-kafka | 2.6.1 | Stable Python Kafka client |
 | cp-kafka (Docker) | 7.7.1 | KRaft-ready, Kafka 3.7 |
+| TimescaleDB | latest-pg16 | PostgreSQL 16 + time-series extensions |
+| Grafana | 11.4.0 | Candlestick panel support, provisioning API |
+| psycopg2-binary | 2.9.10 | PostgreSQL driver for Python sink |
 | Kafka UI | provectuslabs/kafka-ui:latest | Visual topic and partition monitor |
 | pandas | 2.2.3 | Data generation |
 | OpenJDK | 17 | PySpark JVM requirement |
@@ -149,9 +189,12 @@ The PySpark consumer computes 1-minute tumbling window aggregations per stock sy
 - **KRaft mode (no Zookeeper)**: Modern Kafka architecture, simpler ops, fewer containers
 - **Symbol as Kafka key**: Guarantees all trades for a stock land on the same partition, preserving chronological order for correct OHLC windows
 - **3 partitions = 3 Spark cores**: 1:1 mapping between Kafka partitions and PySpark executor threads for zero contention
+- **Decoupled sink**: Standalone Python consumer (not Spark JDBC) avoids classpath issues and keeps memory under 30MB
+- **Idempotent upserts**: `ON CONFLICT DO UPDATE` handles re-processing safely — exactly-once semantics at the storage layer
+- **TimescaleDB hypertable**: Auto-partitioned by time for fast range queries; continuous aggregates pre-compute 5-min candles
+- **Grafana auto-provisioning**: Datasource + dashboard mounted as files — zero manual setup on `docker-compose up`
 - **Synthetic data generator**: Geometric Brownian Motion for realistic price walks, U-shaped intraday volume profile, 65 real NEPSE stocks across 9 sectors
 - **Chunked CSV reading**: 10K rows per chunk keeps memory under 50MB for the 1GB+ dataset
-- **Idempotent producer**: enable.idempotence=True prevents duplicate messages on retry
 
 ## License
 

@@ -1,0 +1,35 @@
+# =============================================================
+# Grafana Datasource Provisioning — TimescaleDB (PostgreSQL)
+# =============================================================
+# WHY auto-provision?
+#   Manual datasource setup (clicking through Grafana UI) is:
+#   1. Error-prone (typos in host/port/credentials)
+#   2. Not reproducible (new team member has to redo it)
+#   3. Lost on docker-compose down -v
+#
+#   This YAML file makes Grafana auto-connect to TimescaleDB
+#   on first boot. Zero manual configuration needed.
+# =============================================================
+
+apiVersion: 1
+
+datasources:
+  - name: TimescaleDB
+    type: postgres
+    access: proxy
+    # WHY "timescaledb" not "localhost"?
+    #   Inside Docker network, services communicate by service name.
+    #   Grafana container → timescaledb container via Docker DNS.
+    url: timescaledb:5432
+    database: nepse_streaming
+    user: nepse_user
+    secureJsonData:
+      password: changeme_in_production
+    jsonData:
+      # PostgreSQL version (TimescaleDB is PostgreSQL 16 under the hood)
+      postgresVersion: 1600
+      sslmode: disable
+      # TimescaleDB flag: enables time_bucket() in query builder
+      timescaledb: true
+    isDefault: true
+    editable: true
