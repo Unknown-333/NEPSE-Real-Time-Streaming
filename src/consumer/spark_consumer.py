@@ -124,6 +124,7 @@ class FloorsheetConsumer:
         # is in PATH so the JVM can find both winutils.exe and hadoop.dll.
         import os
         import platform
+        import glob
         self._is_windows = platform.system() == "Windows"
         if self._is_windows:
             hadoop_home = os.environ.get("HADOOP_HOME", r"C:\hadoop")
@@ -134,6 +135,31 @@ class FloorsheetConsumer:
                 os.environ["PATH"] = hadoop_bin + os.pathsep + os.environ.get("PATH", "")
             logger.info(f"Windows detected. HADOOP_HOME={hadoop_home}, added {hadoop_bin} to PATH")
 
+        # ── Resolve Kafka Connector JARs ──
+        # WHY local-first JAR resolution?
+        #   spark.jars.packages triggers Apache Ivy to resolve dependencies
+        #   from Maven Central on EVERY Spark startup. On Windows, this
+        #   frequently fails with ConnectionResetError (WinError 10054).
+        #
+        #   Solution: If the JARs are already cached in ~/.ivy2/jars/
+        #   (from a previous successful download), we use spark.jars to
+        #   load them directly from disk — zero network, instant startup.
+        #   Only falls back to spark.jars.packages if cache is empty.
+        ivy_jar_dir = os.path.join(os.path.expanduser("~"), ".ivy2", "jars")
+        cached_jars = glob.glob(os.path.join(ivy_jar_dir, "*.jar"))
+
+        use_local_jars = len(cached_jars) > 0
+        if use_local_jars:
+            local_jar_str = ",".join(cached_jars)
+            logger.info(
+                f"Using {len(cached_jars)} cached JARs from {ivy_jar_dir} "
+                f"(skipping Maven resolution)"
+            )
+        else:
+            logger.info(
+                f"No cached JARs found. Will download via Maven: {SPARK_KAFKA_JAR}"
+            )
+
         # ── Build SparkSession ──
         # WHY local[3]?
         #   We have 3 Kafka partitions. Spark assigns 1 task per partition.
@@ -141,23 +167,27 @@ class FloorsheetConsumer:
         #   Using local[*] would over-provision threads for 3 partitions.
         #   Using local[1] would serialize consumption — defeating the
         #   purpose of having 3 partitions.
-        self.spark = (
+        builder = (
             SparkSession.builder
             .appName("NEPSE-Floorsheet-Streaming")
             .master(f"local[{cores}]")
+        )
 
-            # ── Kafka Connector JAR ──
-            # WHY we pin the exact JAR version:
-            #   pyspark 3.5.4 uses Scala 2.12 internally.
-            #   The Kafka connector must match BOTH:
-            #     - Spark version (3.5.4)
-            #     - Scala version (2.12)
-            #   Mismatched JARs cause ClassNotFoundException at runtime.
-            #   This is the #1 pain point for first-time Spark users.
-            .config(
-                "spark.jars.packages",
-                SPARK_KAFKA_JAR,
-            )
+        # ── Kafka Connector JAR ──
+        # WHY we pin the exact JAR version:
+        #   pyspark 3.5.4 uses Scala 2.12 internally.
+        #   The Kafka connector must match BOTH:
+        #     - Spark version (3.5.4)
+        #     - Scala version (2.12)
+        #   Mismatched JARs cause ClassNotFoundException at runtime.
+        #   This is the #1 pain point for first-time Spark users.
+        if use_local_jars:
+            builder = builder.config("spark.jars", local_jar_str)
+        else:
+            builder = builder.config("spark.jars.packages", SPARK_KAFKA_JAR)
+
+        self.spark = (
+            builder
 
             # ── Shuffle partitions ──
             # Default is 200, which is absurd for local development.
