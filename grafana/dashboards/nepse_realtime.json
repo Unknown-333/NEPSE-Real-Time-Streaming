@@ -71,7 +71,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  window_start AS \"time\",\n  open,\n  high,\n  low,\n  close\nFROM ohlcv_1min\nWHERE symbol = '$symbol'\n  AND window_start >= $__timeFrom()\n  AND window_start <= $__timeTo()\nORDER BY window_start ASC;",
+          "rawSql": "SELECT\n  window_start AS \"time\",\n  open,\n  high,\n  low,\n  close\nFROM ohlcv_1min\nWHERE symbol = '$symbol'\n  AND window_start >= (SELECT MAX(window_start) - INTERVAL '1 hour' FROM ohlcv_1min)\n  AND window_start <= (SELECT MAX(window_start) FROM ohlcv_1min)\nORDER BY window_start ASC;",
           "refId": "A"
         }
       ]
@@ -179,7 +179,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  sector,\n  ROUND(AVG(vwap)::NUMERIC, 2) AS avg_vwap\nFROM ohlcv_1min\nWHERE window_start >= NOW() - INTERVAL '1 hour'\nGROUP BY sector\nORDER BY avg_vwap DESC;",
+          "rawSql": "SELECT\n  sector,\n  ROUND(AVG(vwap)::NUMERIC, 2) AS avg_vwap\nFROM ohlcv_1min\nWHERE window_start >= (SELECT MAX(window_start) - INTERVAL '1 hour' FROM ohlcv_1min)\nGROUP BY sector\nORDER BY avg_vwap DESC;",
           "refId": "A"
         }
       ]
@@ -232,7 +232,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  window_start AS \"time\",\n  volume\nFROM ohlcv_1min\nWHERE symbol = '$symbol'\n  AND window_start >= $__timeFrom()\n  AND window_start <= $__timeTo()\nORDER BY window_start ASC;",
+          "rawSql": "SELECT\n  window_start AS \"time\",\n  volume\nFROM ohlcv_1min\nWHERE symbol = '$symbol'\n  AND window_start >= (SELECT MAX(window_start) - INTERVAL '1 hour' FROM ohlcv_1min)\n  AND window_start <= (SELECT MAX(window_start) FROM ohlcv_1min)\nORDER BY window_start ASC;",
           "refId": "A"
         }
       ]
@@ -316,7 +316,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  symbol,\n  sector,\n  SUM(turnover)::NUMERIC AS total_turnover,\n  SUM(volume)::BIGINT AS total_volume,\n  ROUND(AVG(vwap)::NUMERIC, 2) AS avg_vwap,\n  SUM(trade_count)::BIGINT AS trades\nFROM ohlcv_1min\nWHERE window_start >= $__timeFrom()\n  AND window_start <= $__timeTo()\nGROUP BY symbol, sector\nORDER BY total_turnover DESC\nLIMIT 10;",
+          "rawSql": "SELECT\n  symbol,\n  sector,\n  SUM(turnover)::NUMERIC AS total_turnover,\n  SUM(volume)::BIGINT AS total_volume,\n  ROUND(AVG(vwap)::NUMERIC, 2) AS avg_vwap,\n  SUM(trade_count)::BIGINT AS trades\nFROM ohlcv_1min\nWHERE window_start >= (SELECT MAX(window_start) - INTERVAL '1 hour' FROM ohlcv_1min)\n  AND window_start <= (SELECT MAX(window_start) FROM ohlcv_1min)\nGROUP BY symbol, sector\nORDER BY total_turnover DESC\nLIMIT 10;",
           "refId": "A"
         }
       ]
