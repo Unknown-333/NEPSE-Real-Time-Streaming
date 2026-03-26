@@ -2,6 +2,14 @@
 
 A production-grade, end-to-end streaming data pipeline that replays historical Nepal Stock Exchange (NEPSE) floorsheet data through a modern streaming architecture — from raw trades to live Grafana dashboards.
 
+## Demo
+
+<p align="center">
+  <img src="screenshots/grafana_demo.webp" alt="Grafana Dashboard Demo — NEPSE Real-Time Streaming Pipeline" width="100%">
+</p>
+
+> Live Grafana dashboard showing OHLC candlestick charts, VWAP by sector, Top 10 stocks by turnover, and real-time OHLCV data feed — all powered by the streaming pipeline.
+
 ## Architecture
 
 ```
